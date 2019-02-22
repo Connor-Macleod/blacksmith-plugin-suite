@@ -1,5 +1,5 @@
 //=============================================================================
-// BlacksmithHookManager.js - v0.1.0
+// BlacksmithHookManager.js - v0.1.1
 //=============================================================================
 
 /*:
@@ -52,7 +52,7 @@ new PluginManager.Plugin({
         if (Utils.isNwjs()){
             globalObject = global;
         } else {
-            globalObject = Window;
+            globalObject = window;
         }
 
         function accessHook(obj,is, value) {

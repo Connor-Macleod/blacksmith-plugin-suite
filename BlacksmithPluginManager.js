@@ -1,5 +1,5 @@
 //=============================================================================
-// BlacksmithPluginManager.js - v0.1.0
+// BlacksmithPluginManager.js - v0.1.1
 //=============================================================================
 
 /*:
@@ -67,7 +67,9 @@
     let parameters = PluginManager.parameters('BlacksmithPluginManager');
 
 
-    let allowRemoteConfigJson = parameters.allowRemoteConfigJson.toLowerCase()==="true";
+    let allowRemoteConfigJson = parameters
+        && parameters.allowRemoteConfigJson
+        && (parameters.allowRemoteConfigJson.toLowerCase()==="true");
 
     let parameters2;
     let paramsPath = "js/params/BlacksmithPluginManager.json";
@@ -112,23 +114,36 @@
     });
 
     const initNext = function(){
-        for (let plugin of pluginList){
-            if (!plugin._initialised){
-                if (!plugin.dependencies){
-                    //we initlaise this function if it has no dependencies
-                    plugin._initFunction();
-                    initialised.push(plugin);
-                    return true;
-                } else {
-                    let allInitialised = true;
-                    for (let dependency of plugin.dependencies){
-                        if (!dependency._initialised){
-                            allInitialised = false
+
+        for (let index in pluginList){
+            if (pluginList.hasOwnProperty(index)) {
+                let plugin = pluginList[index];
+
+                if (!plugin._initialised) {
+                    if (!plugin.dependencies) {
+                        //we initlaise this function if it has no dependencies
+                        plugin._initFunction();
+                        initialised.push(plugin);
+                        return true;
+                    } else {
+                        let allInitialised = true;
+                        for (let dependencyIndex in plugin.dependencies){
+                            if (plugin.dependencies.hasOwnProperty(dependencyIndex)) {
+                                let dependency = plugin.dependencies[dependencyIndex];
+                                if (dependency.name){
+                                    dependency = dependency.name
+                                }
+                                dependency = pluginList[dependency];
+
+                                if (!dependency._initialised) {
+                                    allInitialised = false
+                                }
+                            }
                         }
-                    }
-                    if (allInitialised){
-                        // we initialise this function if all of it's dependencies have been met
-                        return plugin._initFunction();
+                        if (allInitialised) {
+                            // we initialise this function if all of it's dependencies have been met
+                            return plugin._initFunction();
+                        }
                     }
                 }
             }
@@ -166,7 +181,6 @@
         script.type = 'text/javascript';
         script.src = url;
         script.async = false;
-        script.onerror = this.onError.bind(this);
         script._url = url;
         document.body.appendChild(script);
     };
@@ -197,7 +211,7 @@
     };
 
     const loadOnlineDependency = function(dependency){
-        if (cacheOnlineDependencies && Utils.isNwjs){
+        if (cacheOnlineDependencies && Utils.isNwjs()){
             if (loadFromCache(dependency.name)){
                 return;
             } else {
@@ -218,7 +232,7 @@
                 name: getPluginNameFromUrl(plugin)
             });
         });
-    }
+    };
     loadOnlinePlugins();
 
     let fastParameters = {};
@@ -323,7 +337,7 @@
             this._humanReadableName = pluginConfig.humanReadableName;
             this._globals = pluginConfig.globals;
             this._dependencies = pluginConfig.dependencies;
-            this._initFunction = pluginConfig.initializer;
+            this.init = pluginConfig.initializer;
             Globals[this._id] = this._globals;
             if (this.dependencies){
                 this.dependencies.forEach(function(dependency){
@@ -360,14 +374,17 @@
 
         set init(initFunction){
             if (!this._initFunction){
-                this._initFunction = initFunction(function(error, message){
-                    if (error){
-                        //terminate loading with helpful message
-                    } else {
-                        this._initialised=true;
-                        initNext();
-                    }
-                });
+                let thisplugin = this;
+                this._initFunction = function(){
+                    initFunction(function(error, message){
+                        if (error){
+                            //terminate loading with helpful message
+                        } else {
+                            thisplugin._initialised=true;
+                            initNext();
+                        }
+                    });
+                }
             } else {
                 //throw error about init function already registered
             }
