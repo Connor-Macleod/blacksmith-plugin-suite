@@ -1,5 +1,5 @@
 //=============================================================================
-// BlacksmithPluginManager.js - v0.2.0
+// BlacksmithPluginManager.js - v0.2.1
 //=============================================================================
 
 /*:
@@ -44,8 +44,8 @@
  * @default true
  *
  * @param onlinePlugins
- * @type string[]
- * @desc urls for plugins.
+ * @type struct<OnlinePlugin>[]
+ * @desc Recommended when available!
  *
  * @param extraPluginParameters
  * @desc parameters for plugins can also be set in js/params/pluginName.json
@@ -58,22 +58,35 @@
  *
  */
 
-/*~struct~ExtraParam
+/*~struct~ExtraParam:
  * @param PluginName
  * @text Plugin Name
- * @desc The name of the plugin you want to set a paramater for
+ * @desc The name of the plugin you want to set a parameter for
  * @type string
  *
  * @param ParamName
  * @text Parameter
- * @description The paramater you want to set
+ * @desc The parameter you want to set
  * @type string
  * @parent PluginName
  *
  * @param value
  * @text Parameter Value
- * @description the value of the paramater you are setting
+ * @desc the value of the parameter you are setting
  * @type note
+ *
+ */
+
+/*~struct~OnlinePlugin:
+ * @param name
+ * @text Plugin Name
+ * @desc The name of the plugin you want to load. For Blacksmith plugins this should match the id of the plugin. Optional.
+ * @type string
+ *
+ * @param url
+ * @text Plugin Url
+ * @desc Must include the protocol. (i.e. the "http:" part)
+ * @type string
  *
  */
 
@@ -302,13 +315,13 @@
     };
 
     const loadOnlinePlugins = function(){
-        let onlinePlugins = JSON.parse(parameters.onlinePlugins);
+        onlinePlugins = JSON.parse(parameters.onlinePlugins);
         onlinePlugins.forEach(function(plugin){
-            plugin = plugin.trim();
-            loadOnlineDependency({
-                url: plugin,
-                name: getPluginNameFromUrl(plugin)
-            });
+            plugin = JSON.parse(plugin);
+            if (!plugin.name){
+                plugin.name = getPluginNameFromUrl(plugin.url);
+            }
+            loadOnlineDependency(plugin);
         });
     };
     loadOnlinePlugins();
