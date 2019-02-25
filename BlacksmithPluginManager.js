@@ -1,5 +1,5 @@
 //=============================================================================
-// BlacksmithPluginManager.js - v0.1.1
+// BlacksmithPluginManager.js - v0.2.0
 //=============================================================================
 
 /*:
@@ -7,25 +7,7 @@
  * @author Connor "Saelorable" Macleod <Blacksmith[at]saelora.com>
  *
  * @help This plugin does not provide plugin commands.
- *
- * @param cacheOnlinePlugins
- * @desc Should online plugins be cached when ran locally?. "true/false"
- * @default true
- *
- * @param onlinePlugins
- * @desc comma separates list of plugin URLs
- * EXAMPLE: "http://example.com/plugin.js, https://example.com/plugin.LPMP
- * @default ""
- *
- * @param extraPluginParameters
- * @desc parameters for plugins can also be set in js/params/pluginName.json
- * @default examplePlugin.param = "example value"; examplePlugin.param2 = "another example value"
- *
- * @param allowRemoteConfigJson
- * @desc ADVANCED USERS: set to true to load config from  js/params/BlacksmithPluginManager.json !POTENTIAL LAG!
- * @default false
- *
- * @copyright  Copyright (c) 2019 Connor "Saelorable" Macleod
+ * COPYRIGHT: Copyright (c) 2019 Connor "Saelorable" Macleod
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -56,6 +38,43 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  *
+ * @param cacheOnlinePlugins
+ * @desc Should online plugins be cached when ran locally?
+ * @type boolean
+ * @default true
+ *
+ * @param onlinePlugins
+ * @type string[]
+ * @desc urls for plugins.
+ *
+ * @param extraPluginParameters
+ * @desc parameters for plugins can also be set in js/params/pluginName.json
+ * @type struct<ExtraParam>[]
+ *
+ * @param allowRemoteConfigJson
+ * @desc ADVANCED USERS: set to true to load config from js/params/BlacksmithPluginManager.json !POTENTIAL LAG!
+ * @type boolean
+ * @default false
+ *
+ */
+
+/*~struct~ExtraParam
+ * @param PluginName
+ * @text Plugin Name
+ * @desc The name of the plugin you want to set a paramater for
+ * @type string
+ *
+ * @param ParamName
+ * @text Parameter
+ * @description The paramater you want to set
+ * @type string
+ * @parent PluginName
+ *
+ * @param value
+ * @text Parameter Value
+ * @description the value of the paramater you are setting
+ * @type note
+ *
  */
 
 (function(){
@@ -68,8 +87,7 @@
 
 
     let allowRemoteConfigJson = parameters
-        && parameters.allowRemoteConfigJson
-        && (parameters.allowRemoteConfigJson.toLowerCase()==="true");
+        && parameters.allowRemoteConfigJson;
 
     let parameters2;
     let paramsPath = "js/params/BlacksmithPluginManager.json";
@@ -98,15 +116,14 @@
         }
     }
 
-    const cacheOnlineDependencies = parameters.cacheOnlinePlugins.toLowerCase() === "true";
+    const cacheOnlineDependencies = parameters.cacheOnlinePlugins;
 
     parameters.pluginParameters = {};
-    let extraPluginParameters = parameters.extraPluginParameters.split(";");
-    extraPluginParameters.forEach(function(paramater){
-        let paramName = paramater.split("=")[0];
-        let paramValue = paramater.split("=")[1];
-        let pluginName = paramName.split(".")[0];
-        paramName = paramName.split(".")[0];
+    let extraPluginParameters = parameters.extraPluginParameters && JSON.parse(parameters.extraPluginParameters);
+    extraPluginParameters && extraPluginParameters.forEach(function(paramater){
+        let paramName = paramater.paramName;
+        let paramValue = JSON.parse(paramater.value);
+        let pluginName = paramater.PluginName;
         if (!parameters.pluginParameters[pluginName]){
             parameters.pluginParameters[pluginName] = {};
         }
@@ -185,13 +202,75 @@
         document.body.appendChild(script);
     };
 
-    const cachePlugin = function(plugin){
-        const http = require('http');
-        const fs = require('fs');
-        const file = fs.createWriteStream("js/plugins/cachedWebPlugins/"+plugin.name+".js");
-        http.get(plugin.url, function(response) {
-            response.pipe(file);
+    const cacheFtpPlugin = function(url, name){
+        const net = require('net');
+        let controlSocket;
+        let connectionOptions = {
+            port: url.port || 21,
+            host: url.hostname
+        };
+        let filename;
+        let getFile = function(){
+            let path = url.pathname;
+            const match = /^(.*)[\\/]([^\\/]+)$/.exec(path);
+            filename = match[2];
+            let dir = match[1];
+            controlSocket.write("CWD "+dir+ "\r\n",function(){
+                controlSocket.write("PASV"+ "\r\n", function(){
+
+                });
+            })
+        };
+        controlSocket = net.createConnection(connectionOptions, function(){
+            if(url.username && url.password){
+                controlSocket.write("USER "+url.username+ "\r\n", function(){
+                    controlSocket.write("PASS "+url.password+ "\r\n", getFile)
+                })
+            } else if (url.password){
+                controlSocket.write("USER anonymous"+ "\r\n", function(){
+                    controlSocket.write("PASS "+url.password+ "\r\n", getFile)
+                })
+            } else {
+                controlSocket.write("USER anonymous"+ "\r\n", function(){
+                    controlSocket.write("PASS guest"+ "\r\n", getFile)
+                })
+            }
         });
+        controlSocket.on("data", function(dataBuffer){
+            const data = dataBuffer.toString('utf8');
+            let dataParse = /\((\d{1,3}),(\d{1,3}),(\d{1,3}),(\d{1,3}),(\d{1,3}),(\d{1,3})\)/.exec(data);
+            if (dataParse){
+                let ip = dataParse[1]+"."+dataParse[2]+"."+dataParse[3]+"."+dataParse[4];
+                let port = parseInt(dataParse[5]) * 256+parseInt(dataParse[6]);
+                let dataSocket = net.createConnection({port: port, host: ip}, function(){
+                    const fs = require('fs');
+                    const file = fs.createWriteStream("js/plugins/cachedWebPlugins/"+name+".js");
+                    dataSocket.pipe(file);
+                    controlSocket.write("RETR "+filename+ "\r\n");
+                });
+            } else if(data.match(/(\r\n|^)226/)){
+                controlSocket.end("QUIT"+ "\r\n")
+                dataSocket.end();
+            }
+        });
+    };
+
+    const cachePlugin = function(plugin){
+        const { URL } = require('url');
+        plugin.url = new URL(plugin.url);
+        if (plugin.url.protocol ==='ftp:'){
+            cacheFtpPlugin(plugin.url, plugin.name);
+        } else {
+            const fs = require('fs');
+            const http = require('http');
+            const file = fs.createWriteStream("js/plugins/cachedWebPlugins/"+plugin.name+".js");
+            http.get(plugin.url, function(response) {
+                response.pipe(file);
+            });
+        }
+
+        //since we need access to the script synchronously and the above functions must run
+        // asynchronously, we also have to stream an online copy.
         streamDependency(plugin.url);
     };
 
@@ -205,7 +284,6 @@
         script.type = 'text/javascript';
         script.src = path;
         script.async = false;
-        script.onerror = this.onError.bind(this);
         script._url = path;
         document.body.appendChild(script);
     };
@@ -224,7 +302,7 @@
     };
 
     const loadOnlinePlugins = function(){
-        let onlinePlugins = parameters.onlinePlugins.split(",");
+        let onlinePlugins = JSON.parse(parameters.onlinePlugins);
         onlinePlugins.forEach(function(plugin){
             plugin = plugin.trim();
             loadOnlineDependency({
