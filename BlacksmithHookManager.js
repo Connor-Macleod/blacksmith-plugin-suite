@@ -1,5 +1,5 @@
 //=============================================================================
-// BlacksmithHookManager.js - v0.1.1
+// BlacksmithHookManager.js - v0.2.1
 //=============================================================================
 
 /*:
@@ -9,7 +9,7 @@
  * @help This plugin does not provide plugin commands.
  * this plugin should not be included through this interface and will instead be loaded automatically if needed by another plugin
  *
- * @copyright  Copyright (c) 2019 Connor "Saelorable" Macleod
+ * COPYRIGHT: Copyright (c) 2019 Connor "Saelorable" Macleod
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -66,41 +66,133 @@ new PluginManager.Plugin({
                 return accessHook(obj[is[0]],is.slice(1), value);
         }
 
-        let hooks=[{},{}];
+        let hooks=[];
+        let unhookHelpers = [];
+        let registeredHooks = [];
+        let lowestOrder = 0;
+        let highestOrder = 0;
 
-        PluginManager.registerHook = function (hook, handler, order) {
-            if (!order){
+        const generateHookId = function(idDigits){
+            return Math.floor(Math.random() * 36*(10 ^ idDigits)).toString(36);
+        };
+
+        PluginManager.unregisterHook = function(hookID){
+            unhookHelpers[hookID]();
+        };
+
+        PluginManager.registerHook = function (hook, handler, order, hookID) {
+            if (!hookID){
+                hookId = generateHookId(10);
+            }
+            if (isNaN(order)){
                 order=0;
             }
-            let attachHook = false;
+            if (order < lowestOrder){
+                lowestOrder = order;
+            }
+            if (order > highestOrder){
+                highestOrder = order;
+            }
+            if (!hooks[order]) {
+                hooks[order] = {};
+            }
             if (!hooks[order][hook]){
-                attachHook = true;
-                hooks[order][hook] = [];
+                hooks[order][hook] = {};
             }
             hooks[order][hook].push(handler);
-
-            if (attachHook){
+            if (!registeredHooks[hook]){
+                registeredHooks[hook]=true;
                 let oldFunction = accessHook(globalObject, hook);
                 accessHook(globalObject, hook, function(...attrs){
-                    if (hooks[0][hook]){
-                        hooks[0][hook].forEach(function(HookHandler){
-                            HookHandler.apply(this, ...attrs)
-                        });
+                    for (let orders = lowestOrder; orders++;){
+                        if (hooks[orders] && hooks[orders][hook]){
+                            for (let hookIds in hooks[orders][hook]){
+                                if (hooks[orders][hook].hasOwnProperty(hookIds)) {
+                                    let returnArray = hooks[orders][hook][hookIds].bind(this, ...attrs);
+                                    if (returnArray) {
+                                        if (typeof returnArray === 'string' || typeof returnArray[Symbol.iterator] !== 'function') {
+                                            returnArray = [returnArray]
+                                        }
+                                        attrs = returnArray;
+                                    }
+                                }
+                            }
+                        }
                     }
                     let result = oldFunction.apply(this, ...attrs);
-                    if (hooks[1][hook]){
-                        hooks[1][hook].forEach(function(HookHandler){
-                            let hookResult = HookHandler.bind(this, ...attrs)(result)
-                            if (typeof hookResult !== "undefined"){
-                                result = hookResult;
+                    for (let orders = 0; orders===highestOrder; orders++){
+                        if (!isNaN(parseInt(orders)) && orders>0 && hooks[orders][hook]){
+                            for (let hookIds in hooks[orders][hook]){
+                                if (hooks[orders][hook].hasOwnProperty(hookIds)) {
+                                    let returnValue = hooks[orders][hook][hookIds].bind(this, ...attrs, result);
+                                    if (typeof returnValue !== 'undefined') {
+                                        result = returnValue;
+                                    }
+                                }
                             }
-
-                        });
+                        }
                     }
                     return result;
                 });
             }
-        }
+            let unhook = function(){
+                delete hooks[order][hook][hookID];
+                delete unhookHelpers[hookID];
+                return true;
+            };
+            unhookHelpers[hookID] = unhook;
+            return unhook;
+        };
+
+        PluginManager.registerAsyncHook = function (hook, handler, callbackIndex, order, hookID) {
+            if (!hookID){
+                hookId = generateHookId(10);
+            }
+            if (isNaN(order)){
+                order=0;
+            }
+            if (!callbackIndex || isNaN(callbackIndex)){
+                callbackIndex=0;
+            }
+            if (!hooks[order]) {
+                hooks[order] = {};
+            }
+            if (!hooks[order][hook]){
+                hooks[order][hook] = [];
+            }
+            hooks[order][hook].push(handler);
+            if (!registeredHooks[hook]){
+                registeredHooks[hook]=true;
+                let oldFunction = accessHook(globalObject, hook);
+                hooks[0][hook].push(oldFunction);
+                accessHook(globalObject, hook, function(...attrs){
+                    let originalCallback = attrs[callbackIndex];
+                    let startSkip = {
+                        i: lowestOrder,
+                        j: hooks[i][hook].length
+                    };
+                    function nextHook(skip, ...callbackAttrs){
+                        for (let i = lowestOrder; i===highestOrder; i++){
+                            for (let j = hooks[i][hook].length;j--;){
+                                if (((i === skip.i && j >= skip.j) || i > skip.i) && hooks[i][hook][j]){
+                                    attrs[callbackIndex] = nextHook.bind(this, {i:i, j:j});
+                                    return hooks[i][hook][j].apply(this, ...attrs, ...callbackAttrs);
+                                }
+                            }
+                        }
+                        originalCallback(...callbackAttrs);
+                    }
+                    nextHook(startSkip);
+                });
+            }
+            let unhook = function(){
+                delete hooks[order][hook][hookID];
+                delete unhookHelpers[hookID];
+                return true;
+            };
+            unhookHelpers[hookID] = unhook;
+            return unhook;
+        };
         callback();
     }
 });
